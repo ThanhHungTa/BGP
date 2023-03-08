@@ -1,0 +1,386 @@
+version 18.2R1.9;
+system {
+    root-authentication {
+        encrypted-password "$6$s4NAzdyt$sS/sGc42wa90.JOkI7siBiuYRrG3WCTN4Vih94QyX3ghgmjFYAQ9j5D7d/V70H7BKVsuxp92dESo5U9PG7a.J0"; ## SECRET-DATA
+    }
+    host-name IXP;
+    syslog {
+        user * {
+            any emergency;
+            match "!(.*Scheduler Oinker*.|.*Frame 0*.|.*ms without yielding*.)";
+        }
+        file messages {
+            any notice;
+            authorization info;
+        }
+        file interactive-commands {
+            interactive-commands any;
+        }
+    }
+    processes {
+        dhcp-service {
+            traceoptions {
+                file dhcp_logfile size 10m;
+                level all;
+                flag packet;
+            }
+        }
+    }
+}
+services {
+    rpm {
+        probe VNNIC {
+            test ICMP {
+                probe-type icmp-ping;
+                target address 218.100.14.1;
+                test-interval 3;
+                source-address 103.150.0.1;
+                thresholds {
+                    successive-loss 2;
+                }
+            }
+        }
+        probe SPT {
+            test ICMP1 {
+                probe-type icmp-ping;
+                target address 221.133.29.9;
+                test-interval 3;
+                source-address 103.150.0.1;
+                thresholds {
+                    successive-loss 2;
+                }
+            }
+        }
+        probe TPCOMS {
+            test ICMP2 {
+                probe-type icmp-ping;
+                target address 103.89.87.1;
+                test-interval 3;
+                source-address 103.150.0.2;
+                thresholds {
+                    successive-loss 2;
+                }
+            }
+        }
+    }
+}
+interfaces {
+    ge-0/0/0 {
+        unit 0 {
+            family inet {
+                address 192.168.200.2/30;
+            }
+        }
+    }
+    ge-0/0/2 {
+        unit 0 {
+            family inet {
+                address 192.168.202.2/30;
+            }
+        }
+    }
+    ge-0/0/3 {
+        unit 0 {
+            family inet {
+                address 192.168.204.2/30;
+            }
+        }
+    }
+    ge-0/0/4 {
+        unit 0 {
+            family inet {
+                address 14.225.229.182/30;
+            }
+        }
+    }
+    fxp0 {
+        unit 0 {
+            family inet {
+                dhcp {
+                    vendor-id Juniper-vmx-VM639FF0A55C;
+                }
+            }
+        }
+    }
+    lo0 {
+        unit 0 {
+            family inet {
+                address 2.2.2.2/32;
+                address 103.150.0.100/32;
+                address 103.150.0.101/32;
+                address 103.150.0.1/32;
+                address 103.150.0.2/32;
+            }
+        }
+    }
+}
+event-options {
+    inactive: policy enable-on-ping-success {
+        events ping_test_completed;
+        attributes-match {
+            ping_test_completed.test-owner matches VNNIC;
+            ping_test_completed.test-name matches ICMP;
+        }
+        then {
+            change-configuration {
+                commands {
+                    "deactivate routing-options static route 0.0.0.0/0";
+                    "activate event-options policy disable-on-ping-failure";
+                    "deactivate event-options policy  enable-on-ping-success";
+                }
+            }
+        }
+    }
+    policy disable-on-ping-failure {
+        events ping_test_failed;
+        attributes-match {
+            ping_test_failed.test-owner matches VNNIC;
+            ping_test_failed.test-name matches ICMP;
+        }
+        then {
+            change-configuration {
+                commands {
+                    "activate routing-options static route 0.0.0.0/0";
+                    "activate event-options policy enable-on-ping-success";
+                    "deactivate event-options policy disable-on-ping-failure";
+                }
+            }
+        }
+    }
+}
+routing-options {
+    static {
+        inactive: route 0.0.0.0/0 {
+            next-hop 14.225.229.181;
+            preference 1;
+        }
+    }
+    router-id 2.2.2.2;
+    autonomous-system 135902;
+}
+protocols {
+    bgp {
+        group IBGP {
+            type internal;
+            local-address 192.168.200.2;
+            export [ send-direct next-hop-self IBGP-export ];
+            neighbor 192.168.200.1;
+        }
+        group multi-EBGP {
+            type external;
+            neighbor 221.133.29.9 {
+                multihop {
+                    ttl 2;
+                }
+                local-address 103.150.0.1;
+                family inet {
+                    unicast;
+                }
+                export multiEBGP-Export;
+                peer-as 7602;
+            }
+            neighbor 103.89.87.1 {
+                multihop {
+                    ttl 2;
+                }
+                local-address 103.150.0.2;
+                family inet {
+                    unicast;
+                }
+                export multiEBGP-Export;
+                peer-as 63731;
+            }
+        }
+        group EBGP {
+            type external;
+            export EBGP-Export;
+            neighbor 14.225.229.181 {
+                preference 180;
+                local-address 14.225.229.182;
+                peer-as 135905;
+            }
+        }
+    }
+    ospf {
+        import ospf;
+        area 0.0.0.10 {
+            interface ge-0/0/2.0;
+            interface ge-0/0/3.0;
+            interface ge-0/0/0.0;
+        }
+    }
+}
+policy-options {
+    policy-statement EBGP-Export {
+        term 1 {
+            from {
+                route-filter 103.150.0.0/23 exact accept;
+                route-filter 103.150.0.128/26 exact accept;
+            }
+            then accept;
+        }
+        term 2 {
+            then reject;
+        }
+    }
+    policy-statement IBGP-export {
+        term 1 {
+            from {
+                route-filter 14.225.229.180/30 exact reject;
+            }
+            then accept;
+        }
+    }
+    policy-statement multiEBGP-Export {
+        term 1 {
+            from {
+                route-filter 103.150.0.0/23 exact accept;
+                route-filter 103.150.0.128/26 exact accept;
+            }
+            then accept;
+        }
+        term 2 {
+            then reject;
+        }
+        then accept;
+    }
+    policy-statement next-hop-self {
+        then {
+            next-hop self;
+            accept;
+        }
+    }
+    policy-statement ospf {
+        term 1 {
+            from {
+                route-filter 0.0.0.0/0 exact reject;
+            }
+            then accept;
+        }
+    }
+    policy-statement send-direct {
+        term 1 {
+            from protocol direct;
+            then accept;
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+set version 18.2R1.9
+set system root-authentication encrypted-password "$6$s4NAzdyt$sS/sGc42wa90.JOkI7siBiuYRrG3WCTN4Vih94QyX3ghgmjFYAQ9j5D7d/V70H7BKVsuxp92dESo5U9PG7a.J0"
+set system host-name IXP
+set system syslog user * any emergency
+set system syslog user * match "!(.*Scheduler Oinker*.|.*Frame 0*.|.*ms without yielding*.)"
+set system syslog file messages any notice
+set system syslog file messages authorization info
+set system syslog file interactive-commands interactive-commands any
+set system processes dhcp-service traceoptions file dhcp_logfile
+set system processes dhcp-service traceoptions file size 10m
+set system processes dhcp-service traceoptions level all
+set system processes dhcp-service traceoptions flag packet
+set services rpm probe VNNIC test ICMP probe-type icmp-ping
+set services rpm probe VNNIC test ICMP target address 218.100.14.1
+set services rpm probe VNNIC test ICMP test-interval 3
+set services rpm probe VNNIC test ICMP source-address 103.150.0.1
+set services rpm probe VNNIC test ICMP thresholds successive-loss 2
+set services rpm probe SPT test ICMP1 probe-type icmp-ping
+set services rpm probe SPT test ICMP1 target address 221.133.29.9
+set services rpm probe SPT test ICMP1 test-interval 3
+set services rpm probe SPT test ICMP1 source-address 103.150.0.1
+set services rpm probe SPT test ICMP1 thresholds successive-loss 2
+set services rpm probe TPCOMS test ICMP2 probe-type icmp-ping
+set services rpm probe TPCOMS test ICMP2 target address 103.89.87.1
+set services rpm probe TPCOMS test ICMP2 test-interval 3
+set services rpm probe TPCOMS test ICMP2 source-address 103.150.0.2
+set services rpm probe TPCOMS test ICMP2 thresholds successive-loss 2
+set interfaces ge-0/0/0 unit 0 family inet address 192.168.200.2/30
+set interfaces ge-0/0/2 unit 0 family inet address 192.168.202.2/30
+set interfaces ge-0/0/3 unit 0 family inet address 192.168.204.2/30
+set interfaces ge-0/0/4 unit 0 family inet address 14.225.229.182/30
+set interfaces fxp0 unit 0 family inet dhcp vendor-id Juniper-vmx-VM639FF0A55C
+set interfaces lo0 unit 0 family inet address 2.2.2.2/32
+set interfaces lo0 unit 0 family inet address 103.150.0.100/32
+set interfaces lo0 unit 0 family inet address 103.150.0.101/32
+set interfaces lo0 unit 0 family inet address 103.150.0.1/32
+set interfaces lo0 unit 0 family inet address 103.150.0.2/32
+set event-options policy enable-on-ping-success events ping_test_completed
+set event-options policy enable-on-ping-success attributes-match ping_test_completed.test-owner matches VNNIC
+set event-options policy enable-on-ping-success attributes-match ping_test_completed.test-name matches ICMP
+set event-options policy enable-on-ping-success then change-configuration commands "deactivate routing-options static route 0.0.0.0/0"
+set event-options policy enable-on-ping-success then change-configuration commands "activate event-options policy disable-on-ping-failure"
+set event-options policy enable-on-ping-success then change-configuration commands "deactivate event-options policy  enable-on-ping-success"
+deactivate event-options policy enable-on-ping-success
+set event-options policy disable-on-ping-failure events ping_test_failed
+set event-options policy disable-on-ping-failure attributes-match ping_test_failed.test-owner matches VNNIC
+set event-options policy disable-on-ping-failure attributes-match ping_test_failed.test-name matches ICMP
+set event-options policy disable-on-ping-failure then change-configuration commands "activate routing-options static route 0.0.0.0/0"
+set event-options policy disable-on-ping-failure then change-configuration commands "activate event-options policy enable-on-ping-success"
+set event-options policy disable-on-ping-failure then change-configuration commands "deactivate event-options policy disable-on-ping-failure"
+set routing-options static route 0.0.0.0/0 next-hop 14.225.229.181
+set routing-options static route 0.0.0.0/0 preference 1
+deactivate routing-options static route 0.0.0.0/0
+set routing-options router-id 2.2.2.2
+set routing-options autonomous-system 135902
+set protocols bgp group IBGP type internal
+set protocols bgp group IBGP local-address 192.168.200.2
+set protocols bgp group IBGP export send-direct
+set protocols bgp group IBGP export next-hop-self
+set protocols bgp group IBGP export IBGP-export
+set protocols bgp group IBGP neighbor 192.168.200.1
+set protocols bgp group multi-EBGP type external
+set protocols bgp group multi-EBGP neighbor 221.133.29.9 multihop ttl 2
+set protocols bgp group multi-EBGP neighbor 221.133.29.9 local-address 103.150.0.1
+set protocols bgp group multi-EBGP neighbor 221.133.29.9 family inet unicast
+set protocols bgp group multi-EBGP neighbor 221.133.29.9 export multiEBGP-Export
+set protocols bgp group multi-EBGP neighbor 221.133.29.9 peer-as 7602
+set protocols bgp group multi-EBGP neighbor 103.89.87.1 multihop ttl 2
+set protocols bgp group multi-EBGP neighbor 103.89.87.1 local-address 103.150.0.2
+set protocols bgp group multi-EBGP neighbor 103.89.87.1 family inet unicast
+set protocols bgp group multi-EBGP neighbor 103.89.87.1 export multiEBGP-Export
+set protocols bgp group multi-EBGP neighbor 103.89.87.1 peer-as 63731
+set protocols bgp group EBGP type external
+set protocols bgp group EBGP export EBGP-Export
+set protocols bgp group EBGP neighbor 14.225.229.181 preference 180
+set protocols bgp group EBGP neighbor 14.225.229.181 local-address 14.225.229.182
+set protocols bgp group EBGP neighbor 14.225.229.181 peer-as 135905
+set protocols ospf import ospf
+set protocols ospf area 0.0.0.10 interface ge-0/0/2.0
+set protocols ospf area 0.0.0.10 interface ge-0/0/3.0
+set protocols ospf area 0.0.0.10 interface ge-0/0/0.0
+set policy-options policy-statement EBGP-Export term 1 from route-filter 103.150.0.0/23 exact accept
+set policy-options policy-statement EBGP-Export term 1 from route-filter 103.150.0.128/26 exact accept
+set policy-options policy-statement EBGP-Export term 1 then accept
+set policy-options policy-statement EBGP-Export term 2 then reject
+set policy-options policy-statement IBGP-export term 1 from route-filter 14.225.229.180/30 exact reject
+set policy-options policy-statement IBGP-export term 1 then accept
+set policy-options policy-statement multiEBGP-Export term 1 from route-filter 103.150.0.0/23 exact accept
+set policy-options policy-statement multiEBGP-Export term 1 from route-filter 103.150.0.128/26 exact accept
+set policy-options policy-statement multiEBGP-Export term 1 then accept
+set policy-options policy-statement multiEBGP-Export term 2 then reject
+set policy-options policy-statement multiEBGP-Export then accept
+set policy-options policy-statement next-hop-self then next-hop self
+set policy-options policy-statement next-hop-self then accept
+set policy-options policy-statement ospf term 1 from route-filter 0.0.0.0/0 exact reject
+set policy-options policy-statement ospf term 1 then accept
+set policy-options policy-statement send-direct term 1 from protocol direct
+set policy-options policy-statement send-direct term 1 then accept
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,28 @@
+interface Loopback0
+ ip address 10.10.10.10 255.255.255.255
+!
+interface FastEthernet0/0
+ ip address 14.225.229.181 255.255.255.252
+ duplex full
+!
+interface FastEthernet1/0
+ no ip address
+ shutdown
+ duplex full
+!
+interface FastEthernet2/0
+ no ip address
+ shutdown
+ duplex full
+!
+router bgp 135905
+ bgp log-neighbor-changes
+ neighbor 14.225.229.182 remote-as 135902
+ neighbor 14.225.229.182 default-originate
+!
+ip forward-protocol nd
+!
+!
+no ip http server
+no ip http secure-server
+ip route 103.150.0.0 255.255.254.0 14.225.229.182
